@@ -3,6 +3,7 @@ import json
 import hashlib
 import random
 import zipfile
+import subprocess
 from PIL import Image
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
@@ -32,36 +33,63 @@ class MainWindow(QMainWindow):
         self.load_settings()
 
     def init_controls(self):
-        self.resize_mode_dropdown = QComboBox()
-        self.resize_mode_dropdown.addItems(["No Resize", "Resize by Width", "Resize by Height"])
-        self.resize_input = QLineEdit()
-        self.resize_input.setPlaceholderText("%")
-        self.resize_input.setFixedWidth(50)
-
         layout = QHBoxLayout()
 
         self.file_type_dropdown = QComboBox()
         self.file_type_dropdown.addItems(["JPEG", "PNG"])
+        self.file_type_dropdown.setToolTip("Select the export file format.")
 
         self.output_label = QLabel("No folder selected")
         self.prefix_input = QLineEdit("cropped")
+        self.prefix_input.setToolTip("Prefix for each exported filename.")
         self.suffix_input = QLineEdit("")
+        self.suffix_input.setToolTip("Suffix to add at the end of each filename.")
+        self.resize_mode_dropdown = QComboBox()
+        self.resize_mode_dropdown.addItems(["No Resize", "Resize by Width", "Resize by Height"])
+        self.resize_mode_dropdown.setToolTip("Choose whether to resize width or height.")
+        self.resize_input = QLineEdit()
+        self.resize_input.setPlaceholderText("%")
+        self.resize_input.setFixedWidth(50)
+        self.resize_input.setToolTip("Enter percentage to resize each cropped image.")
+
         self.output_btn = QPushButton("📁 Select Output Folder")
         self.output_btn.clicked.connect(self.select_output_folder)
+        self.output_btn.setToolTip("Choose the folder where images will be saved.")
 
         self.grid_btn = QPushButton("🧮 Toggle Grid")
         self.grid_btn.clicked.connect(self.toggle_grid_preview)
+        self.grid_btn.setToolTip("Toggle grid overlay preview.")
+
         self.zip_checkbox = QCheckBox("📦 Export as ZIP only")
+        self.zip_checkbox.setToolTip("If enabled, all cropped images will be zipped.")
+
         self.open_btn = QPushButton("🖼️ Open Image")
         self.open_btn.clicked.connect(self.open_image_dialog)
+        self.open_btn.setToolTip("Open an image to begin cropping.")
 
-        for w in [QLabel("Type:"), self.file_type_dropdown, QLabel("Prefix:"), self.prefix_input,
+        self.filename_preview_label = QLabel("Preview:")
+        self.filename_preview_label.setStyleSheet("font-size: 10pt; color: gray;")
+
+        self.prefix_input.textChanged.connect(self.update_filename_preview)
+        self.suffix_input.textChanged.connect(self.update_filename_preview)
+        self.file_type_dropdown.currentTextChanged.connect(self.update_filename_preview)
+
+        for w in [QLabel("Type:"), self.file_type_dropdown,
+                  QLabel("Prefix:"), self.prefix_input,
+                  QLabel("Suffix:"), self.suffix_input,
                   QLabel("Resize Output:"), self.resize_mode_dropdown, self.resize_input,
-                  QLabel("Suffix:"), self.suffix_input, self.output_btn, self.output_label,
+                  self.output_btn, self.output_label,
                   self.grid_btn, self.zip_checkbox, self.open_btn]:
             layout.addWidget(w)
 
+        layout.addWidget(self.filename_preview_label)
         self.main_layout.addLayout(layout)
+
+    def update_filename_preview(self):
+        prefix = self.prefix_input.text() or "cropped"
+        suffix = self.suffix_input.text() or ""
+        ext = ".jpg" if self.file_type_dropdown.currentText() == "JPEG" else ".png"
+        self.filename_preview_label.setText(f"Preview: {prefix}-1-[HASH]{suffix}{ext}")
 
     def init_canvas(self):
         self.canvas = ImageCanvas(on_image_loaded=self.on_image_loaded, on_guides_updated=self.on_guides_changed)
@@ -72,8 +100,10 @@ class MainWindow(QMainWindow):
         self.status = QLabel("")
         self.clear_btn = QPushButton("🧹 Clear")
         self.clear_btn.clicked.connect(self.on_clear_clicked)
+        self.clear_btn.setToolTip("Clear the canvas and reset.")
         self.export_btn = QPushButton("🔍 Preview")
         self.export_btn.clicked.connect(self.on_export_clicked)
+        self.export_btn.setToolTip("Preview or Export images based on guide lines.")
         for w in [self.status, self.clear_btn, self.export_btn]:
             layout.addWidget(w)
         self.main_layout.addLayout(layout)
@@ -139,9 +169,6 @@ class MainWindow(QMainWindow):
             self.status.setText("⚠️ No crop lines added. The entire image will be exported as one section.")
         else:
             self.status.setText("✅ Crop lines added. You can proceed to Export.")
-
-    
-    
     def export_images(self):
         vertical = self.canvas.get_vertical_guides()
         horizontal = self.canvas.get_horizontal_guides()
@@ -209,7 +236,7 @@ class MainWindow(QMainWindow):
                 x1, x2 = x_lines[i], x_lines[i + 1]
                 y1, y2 = y_lines[j], y_lines[j + 1]
                 crop = image.crop((x1, y1, x2, y2))
-                # Resize if requested
+
                 resize_mode = self.resize_mode_dropdown.currentText()
                 try:
                     percent = float(self.resize_input.text())
@@ -246,7 +273,17 @@ class MainWindow(QMainWindow):
                     os.remove(file_path)
 
         self.status.setStyleSheet("color: green;")
-        self.status.setText(f"✅ Exported {idx - 1} images. " + ("ZIP created." if export_as_zip else "Saved in folder."))
+        self.status.setText(f"✅ Exported {idx - 1} images.")
+        QMessageBox.information(
+            self, "Export Completed",
+            f"✅ Successfully exported {idx - 1} image(s) to:\n{out_dir}",
+            QMessageBox.StandardButton.Ok
+        )
+        try:
+            path_to_open = os.path.abspath(out_dir).replace("/", "\\")
+            subprocess.Popen(["explorer", path_to_open])
+        except Exception as e:
+            print("Could not open folder:", e)
         self.save_settings()
 
     def save_settings(self):
